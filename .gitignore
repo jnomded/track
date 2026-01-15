@@ -179,3 +179,5 @@ pyrightconfig.json
 
 *.tif
 *.png
+*.csv
+dataset_osm/*

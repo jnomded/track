@@ -27,9 +27,9 @@ MIN_LAT, MIN_LON = 24.39, -125.00
 MAX_LAT, MAX_LON = 49.38, -66.93
 
 OUTPUT_DIR = Path("dataset_osm")
-CHIP_SIZE = 224  # pixels compatible with MobileNetV2
-MAX_POSITIVES = 12 
-MAX_NEGATIVES = 15
+CHIP_SIZE = 1024  # pixels compatible with MobileNetV2
+MAX_POSITIVES = 24 #1200
+MAX_NEGATIVES = 30 #1500
 NAIP_YEAR = None
  
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
@@ -325,8 +325,10 @@ def main():
                 s.label, s.lat, s.lon, s.osmid, s.primary_tag, s.sport_tag, s.kind
             ])
         except Exception as e:
-            print(f"  Error processing {s.osmid}: {e}")
-            continue
+        if "No NAIP data found" in str(e):
+             print(f"  Skipping {s.osmid} (likely outside US NAIP coverage)")
+        else:
+             print(f"  Error processing {s.osmid}: {e}")
 
     # Save Metadata
     csv_path = OUTPUT_DIR / "labels.csv"

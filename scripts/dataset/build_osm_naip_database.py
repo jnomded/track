@@ -28,8 +28,8 @@ MAX_LAT, MAX_LON = 49.38, -66.93
 
 OUTPUT_DIR = Path("dataset_osm")
 CHIP_SIZE = 1024  # pixels compatible with MobileNetV2
-MAX_POSITIVES = 12 #1200
-MAX_NEGATIVES = 15 #1500
+MAX_POSITIVES = 1200 #1200
+MAX_NEGATIVES = 1500 #1500
 NAIP_YEAR = None
  
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
@@ -58,7 +58,7 @@ def slugify(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", s).strip("_")
 
 
-def overpass_query(query: str, paused_s: float = 5.0) -> Dict[str, Any]:
+def overpass_query(query: str, paused_s: float = 2.5) -> Dict[str, Any]:
     """Execute Overpass API query with a pause to be polite."""
     print("Running Overpass query...")
     resp = requests.post(OVERPASS_URL, data={"data": query})
@@ -121,7 +121,7 @@ def get_osm_data() -> (List[Sample], List[Sample]):
     # 1. Positives: Running tracks
     print(f"Fetching positives in bbox: {box}...")
     query_pos = f"""
-        [out:json][timeout:500];
+        [out:json][timeout:250];
         (
           way["leisure"="track"]["sport"~"athletics|running"]({box});
           relation["leisure"="track"]["sport"~"athletics|running"]({box});
@@ -134,7 +134,7 @@ def get_osm_data() -> (List[Sample], List[Sample]):
     # 2. Negatives: Stadiums, pitches, etc.
     print("Fetching negatives...")
     query_neg = f"""
-        [out:json][timeout:500];
+        [out:json][timeout:250];
         (
           way["leisure"="stadium"]({box});
           relation["leisure"="stadium"]({box});
@@ -288,6 +288,10 @@ def save_naip_chip(sample: Sample, output_path: Path):
 
 
 def main():
+
+    start_time = time.time()
+
+
     random.seed(42)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
@@ -339,6 +343,7 @@ def main():
         
     print(f"\nDone! Database created at {OUTPUT_DIR.absolute()}")
     print(f"Total samples: {len(csv_rows)}")
+    print(f"Total time elapsed: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}")
 
 
 if __name__ == "__main__":

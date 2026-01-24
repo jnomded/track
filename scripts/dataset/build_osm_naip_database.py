@@ -343,7 +343,7 @@ def main():
         
     print(f"\nDone! Database created at {OUTPUT_DIR.absolute()}")
     print(f"Total samples: {len(csv_rows)}")
-    print(f"Total time elapsed: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}")
+    print(f"Total time elapsed: {time.strftime('%H:%M:%S', time.localtime(time.time() - start_time))}")
 
 
 if __name__ == "__main__":

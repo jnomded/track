@@ -12,7 +12,7 @@ DATASET_DIR = Path("dataset_osm")
 CSV_PATH = DATASET_DIR / "labels.csv"
 TRACK_DIR = DATASET_DIR / "track"
 NOT_TRACK_DIR = DATASET_DIR / "not_track"
-DISPLAY_SIZE = (800, 800)  # Size to display image in window
+DISPLAY_SIZE = (600, 600)  # Size to display image in window
 
 class ChipReviewApp:
     def __init__(self, root):

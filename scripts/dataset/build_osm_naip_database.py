@@ -28,12 +28,21 @@ MAX_LAT, MAX_LON = 49.38, -66.93
 
 OUTPUT_DIR = Path("dataset_osm")
 CHIP_SIZE = 1024  # pixels compatible with MobileNetV2
-MAX_POSITIVES = 1500 #1200
-MAX_NEGATIVES = 1500 #1500
+MAX_POSITIVES = 75 #1200
+MAX_NEGATIVES = 75 #1500
 NAIP_YEAR = None
+
+# Fraction of positives guaranteed to be stadium-type running tracks (Hayward Field, etc.)
+STADIUM_TRACK_RATIO = 0.15
+# Fractions of negatives allocated to each hard-negative category
+NEG_RATIO_MOTOR_RACING  = 0.05  # NASCAR ovals, F1 circuits, drag strips
+NEG_RATIO_SPORTS_STADIUM = 0.15  # football/soccer/baseball stadiums
+NEG_RATIO_HORSE_RACING   = 0.05  # horse racing ovals
+# Remainder goes to general venues (pitches, golf, sports_centres, etc.)
  
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+#Earth radius in meters for distance calculations
 R_EARTH = 6371000.0
 
 
@@ -117,9 +126,29 @@ def filter_by_distance(samples: List[Sample], min_dist_m: float = 100.0) -> List
 
 def get_osm_data() -> Tuple[List[Sample], List[Sample]]:
     box = f"{MIN_LAT},{MIN_LON},{MAX_LAT},{MAX_LON}"
-    
-    # 1. Positives: Running tracks
-    print(f"Fetching positives in bbox: {box}...")
+
+    # ------------------------------------------------------------------
+    # POSITIVES
+    # ------------------------------------------------------------------
+
+    # 1a. Priority: stadium-type running tracks (Hayward Field, etc.)
+    #     These are leisure=track ways/relations that sit inside an
+    #     athletics stadium area.
+    print("Fetching stadium running tracks (priority positives)...")
+    query_stadium_tracks = f"""
+        [out:json][timeout:250][bbox:{box}];
+        area["leisure"="stadium"]["sport"~"athletics"]->.stadiums;
+        (
+          way["leisure"="track"]["sport"~"athletics|running"](area.stadiums);
+          relation["leisure"="track"]["sport"~"athletics|running"](area.stadiums);
+        );
+        out center {int(MAX_POSITIVES * 3)};
+    """
+    data_stadium = overpass_query(query_stadium_tracks)
+    stadium_tracks = parse_overpass_elements(data_stadium.get("elements", []), label=1, kind="stadium_track")
+
+    # 1b. Regular running tracks
+    print("Fetching regular running tracks...")
     query_pos = f"""
         [out:json][timeout:250];
         (
@@ -129,10 +158,31 @@ def get_osm_data() -> Tuple[List[Sample], List[Sample]]:
         out center {int(MAX_POSITIVES * 5)};
     """
     data_pos = overpass_query(query_pos)
-    positives = parse_overpass_elements(data_pos.get("elements", []), label=1, kind="positive")
-    
-    # 2. Negatives: Stadiums, pitches, etc.
-    print("Fetching negatives...")
+    regular_tracks = parse_overpass_elements(data_pos.get("elements", []), label=1, kind="positive")
+
+    # Deduplicate each group, then deduplicate overlap between them
+    stadium_tracks = filter_by_distance(stadium_tracks, 80.0)
+    regular_tracks = filter_by_distance(regular_tracks, 80.0)
+
+    stadium_ids = {s.osmid for s in stadium_tracks}
+    regular_tracks = [s for s in regular_tracks if s.osmid not in stadium_ids]
+
+    # Guarantee stadium track quota, fill remainder with regular tracks
+    max_stadium = int(MAX_POSITIVES * STADIUM_TRACK_RATIO)
+    if len(stadium_tracks) > max_stadium:
+        stadium_tracks = random.sample(stadium_tracks, max_stadium)
+    max_regular = MAX_POSITIVES - len(stadium_tracks)
+    if len(regular_tracks) > max_regular:
+        regular_tracks = random.sample(regular_tracks, max_regular)
+
+    positives = stadium_tracks + regular_tracks
+
+    # ------------------------------------------------------------------
+    # NEGATIVES
+    # ------------------------------------------------------------------
+
+    # 2a. General venues (pitches, golf, sports centres, generic stadiums)
+    print("Fetching general venue negatives...")
     query_neg = f"""
         [out:json][timeout:1000];
         (
@@ -150,20 +200,81 @@ def get_osm_data() -> Tuple[List[Sample], List[Sample]]:
         out center {int(MAX_NEGATIVES * 5)};
     """
     data_neg = overpass_query(query_neg)
-    negatives = parse_overpass_elements(data_neg.get("elements", []), label=0, kind="hard_negative")
+    general_negatives = parse_overpass_elements(data_neg.get("elements", []), label=0, kind="hard_negative")
 
-    # Deduplicate
-    print(f"Raw counts: {len(positives)} pos, {len(negatives)} neg")
-    positives = filter_by_distance(positives, 80.0)
-    negatives = filter_by_distance(negatives, 80.0)
+    # 2b. Motor racing tracks (NASCAR ovals, F1 circuits, drag strips)
+    print("Fetching motor racing tracks (negatives)...")
+    query_motor = f"""
+        [out:json][timeout:250];
+        (
+          way["leisure"="track"]["sport"~"motor_racing|motorsport"]({box});
+          relation["leisure"="track"]["sport"~"motor_racing|motorsport"]({box});
+        );
+        out center {int(MAX_NEGATIVES * 3)};
+    """
+    data_motor = overpass_query(query_motor)
+    motor_tracks = parse_overpass_elements(data_motor.get("elements", []), label=0, kind="motor_racing")
 
-    # Subsample
-    if len(positives) > MAX_POSITIVES:
-        positives = random.sample(positives, MAX_POSITIVES)
-    if len(negatives) > MAX_NEGATIVES:
-        negatives = random.sample(negatives, MAX_NEGATIVES)
-        
+    # 2c. Sports stadiums (football, soccer, baseball, basketball, hockey)
+    print("Fetching sports stadiums (negatives)...")
+    query_sports = f"""
+        [out:json][timeout:500];
+        (
+          way["leisure"="stadium"]["sport"~"american_football|soccer|association_football|baseball|basketball|ice_hockey|rugby"]({box});
+          relation["leisure"="stadium"]["sport"~"american_football|soccer|association_football|baseball|basketball|ice_hockey|rugby"]({box});
+        );
+        out center {int(MAX_NEGATIVES * 3)};
+    """
+    data_sports = overpass_query(query_sports)
+    sports_stadiums = parse_overpass_elements(data_sports.get("elements", []), label=0, kind="sports_stadium")
+
+    # 2d. Horse racing tracks
+    print("Fetching horse racing tracks (negatives)...")
+    query_horse = f"""
+        [out:json][timeout:250];
+        (
+          way["leisure"="track"]["sport"="horse_racing"]({box});
+          relation["leisure"="track"]["sport"="horse_racing"]({box});
+        );
+        out center {int(MAX_NEGATIVES * 3)};
+    """
+    data_horse = overpass_query(query_horse)
+    horse_tracks = parse_overpass_elements(data_horse.get("elements", []), label=0, kind="horse_racing")
+
+    # Deduplicate each negative category independently
+    general_negatives = filter_by_distance(general_negatives, 80.0)
+    motor_tracks      = filter_by_distance(motor_tracks, 80.0)
+    sports_stadiums   = filter_by_distance(sports_stadiums, 80.0)
+    horse_tracks      = filter_by_distance(horse_tracks, 80.0)
+
+    # Proportional allocation for negatives
+    max_motor  = int(MAX_NEGATIVES * NEG_RATIO_MOTOR_RACING)
+    max_sports = int(MAX_NEGATIVES * NEG_RATIO_SPORTS_STADIUM)
+    max_horse  = int(MAX_NEGATIVES * NEG_RATIO_HORSE_RACING)
+
+    if len(motor_tracks)    > max_motor:  motor_tracks    = random.sample(motor_tracks, max_motor)
+    if len(sports_stadiums) > max_sports: sports_stadiums = random.sample(sports_stadiums, max_sports)
+    if len(horse_tracks)    > max_horse:  horse_tracks    = random.sample(horse_tracks, max_horse)
+
+    max_general = MAX_NEGATIVES - len(motor_tracks) - len(sports_stadiums) - len(horse_tracks)
+    if len(general_negatives) > max_general:
+        general_negatives = random.sample(general_negatives, max_general)
+
+    negatives = general_negatives + motor_tracks + sports_stadiums + horse_tracks
+
+    # ------------------------------------------------------------------
+    # Summary
+    # ------------------------------------------------------------------
+    print(f"\nPositive breakdown:")
+    print(f"  Stadium tracks : {sum(1 for s in positives if s.kind == 'stadium_track')}")
+    print(f"  Regular tracks : {sum(1 for s in positives if s.kind == 'positive')}")
+    print(f"Negative breakdown:")
+    print(f"  General venues : {sum(1 for s in negatives if s.kind == 'hard_negative')}")
+    print(f"  Motor racing   : {sum(1 for s in negatives if s.kind == 'motor_racing')}")
+    print(f"  Sports stadiums: {sum(1 for s in negatives if s.kind == 'sports_stadium')}")
+    print(f"  Horse racing   : {sum(1 for s in negatives if s.kind == 'horse_racing')}")
     print(f"Final counts: {len(positives)} pos, {len(negatives)} neg")
+
     return positives, negatives
 
 

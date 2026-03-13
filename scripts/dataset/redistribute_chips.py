@@ -17,25 +17,25 @@ DISPLAY_SIZE = (600, 600)  # Size to display image in window
 class ChipReviewApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Positive Chip Reviewer")
-        
+        self.root.title("Chip Reviewer")
+
         # State
         self.rows: List[Optional[List[str]]] = []
         self.headers = []
         self.current_queue_index = 0
         self.review_queue = [] # List of indices in self.rows to review
-        
+
         # Layout
         self.frame = tk.Frame(root)
         self.frame.pack(fill=tk.BOTH, expand=True)
 
         self.lbl_image = tk.Label(self.frame, text="Loading...")
         self.lbl_image.pack(pady=10, fill=tk.BOTH, expand=True)
-        
+
         self.lbl_info = tk.Label(root, text="", font=("Arial", 14, "bold"))
         self.lbl_info.pack(pady=5)
 
-        self.lbl_help = tk.Label(root, text="⬅️ LEFT: Keep (Yes)   |   ➡️ RIGHT: Move to Negatives (No)   |   ⬇️ DOWN: Delete", font=("Arial", 12))
+        self.lbl_help = tk.Label(root, text="⬅️ LEFT: Keep   |   ➡️ RIGHT: Move to Other Class   |   ⬇️ DOWN: Delete", font=("Arial", 12))
         self.lbl_help.pack(pady=10)
 
         # Bindings
@@ -60,21 +60,23 @@ class ChipReviewApp:
             self.rows = list(reader)
 
         print(f"Loaded {len(self.rows)} total rows.")
-        
-        # Identify rows to review: Label='1' (track) and file actually exists
+
+        # Identify rows to review: both positives and negatives where file exists
         for i, row in enumerate(self.rows):
             # Row structure: [filepath, label, lat, lon, osmid, tag, sport, kind]
             # label is index 1
             if row is None:
                 continue
-            if row[1] == '1':
+            if row[1] in ('0', '1'):
                 full_path = DATASET_DIR / row[0]
                 if full_path.exists():
                     self.review_queue.append(i)
-        
-        print(f"Found {len(self.review_queue)} positive examples to review.")
+
+        pos = sum(1 for i in self.review_queue if self.rows[i][1] == '1')
+        neg = len(self.review_queue) - pos
+        print(f"Found {len(self.review_queue)} examples to review ({pos} positive, {neg} negative).")
         if not self.review_queue:
-            messagebox.showinfo("Done", "No positive samples found to review!")
+            messagebox.showinfo("Done", "No samples found to review!")
             self.root.destroy()
 
     def show_current(self):
@@ -98,8 +100,9 @@ class ChipReviewApp:
             self.lbl_image.config(image=self.tk_img, text="")
             
             # Update Info Label
-            # filename / current index
-            self.lbl_info.config(text=f"Image {self.current_queue_index + 1} / {len(self.review_queue)}\n{filepath.name}")
+            label = row[1]
+            label_str = "POSITIVE (track)" if label == '1' else "NEGATIVE (not_track)"
+            self.lbl_info.config(text=f"Image {self.current_queue_index + 1} / {len(self.review_queue)}  [{label_str}]\n{filepath.name}")
             
         except Exception as e:
             print(f"Error loading {filepath}: {e}")
@@ -113,33 +116,40 @@ class ChipReviewApp:
         self.show_current()
 
     def action_move(self, event):
-        """Move to negatives (not_track)."""
+        """Move to the other class (positive↔negative)."""
         row_idx = self.review_queue[self.current_queue_index]
         row = self.rows[row_idx]
-        
+
         old_path = DATASET_DIR / row[0]
         filename = old_path.name
-        
-        # Ensure not_track directory exists
-        NOT_TRACK_DIR.mkdir(exist_ok=True)
-        new_path = NOT_TRACK_DIR / filename
-        
+
+        label_idx = self.headers.index("label") if "label" in self.headers else 1
+        path_idx = self.headers.index("filepath") if "filepath" in self.headers else 0
+        kind_idx = self.headers.index("kind") if "kind" in self.headers else 7
+
+        current_label = row[label_idx]
+        if current_label == '1':
+            # Positive → move to not_track
+            NOT_TRACK_DIR.mkdir(exist_ok=True)
+            new_path = NOT_TRACK_DIR / filename
+            new_label = '0'
+            new_kind = "manual_negative"
+        else:
+            # Negative → move to track
+            TRACK_DIR.mkdir(exist_ok=True)
+            new_path = TRACK_DIR / filename
+            new_label = '1'
+            new_kind = "manual_positive"
+
         try:
             shutil.move(old_path, new_path)
-            
-            # Update Data Frame
-            label_idx = self.headers.index("label") if "label" in self.headers else 1
-            path_idx = self.headers.index("filepath") if "filepath" in self.headers else 0
-            kind_idx = self.headers.index("kind") if "kind" in self.headers else 7
-            
-            self.rows[row_idx][label_idx] = '0'
+
+            self.rows[row_idx][label_idx] = new_label
             self.rows[row_idx][path_idx] = str(new_path.relative_to(DATASET_DIR))
-            # Optional: update 'kind' to indicate it was manually moved? 
-            # Keeping it simple for now, maybe mark as hard_negative
             if len(self.rows[row_idx]) > kind_idx:
-                self.rows[row_idx][kind_idx] = "manual_negative"
-                
-            print(f"Moved {filename} to not_track")
+                self.rows[row_idx][kind_idx] = new_kind
+
+            print(f"Moved {filename} to {'track' if new_label == '1' else 'not_track'}")
         except Exception as e:
             print(f"Failed to move file: {e}")
             

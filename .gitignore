@@ -184,8 +184,7 @@ pyrightconfig.json
 *.png
 *.csv
 dataset_osm/*
-*.keras
-!models/track_model.keras
+
 
 models/transfer_learning.ipynb
 

@@ -21,9 +21,7 @@ services:
     env_file: ./app/backend/.env
     environment:
       - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      - MODEL_PATH=/models/track_model.keras
-    volumes:
-      - ./models:/models:ro
+      - MODEL_PATH=/app/track_model.keras
     ports:
       - "8000:8000"
     depends_on:

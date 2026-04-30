@@ -22,7 +22,7 @@ _model_path_env = os.getenv("MODEL_PATH")
 MODEL_PATH = (
     Path(_model_path_env)
     if _model_path_env
-    else Path(__file__).resolve().parent.parent.parent / "models" / "track_model.keras"
+    else Path(__file__).resolve().parent / "track_model.keras"
 )
 
 ZOOM = 16

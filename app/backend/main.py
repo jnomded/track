@@ -46,7 +46,7 @@ _origins = ["http://localhost:5173"] + ([_extra_origin] if _extra_origin else []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_methods=["GET", "POST", "PATCH"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
